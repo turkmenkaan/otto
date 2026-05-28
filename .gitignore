@@ -1,0 +1,18 @@
+# Secrets & local config
+.env
+
+# Runtime state
+events.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
