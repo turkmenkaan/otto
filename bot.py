@@ -173,9 +173,9 @@ class EventSubmissionModal(Modal, title="Submit Event"):
             )
             return
 
-        if dt <= datetime.now(timezone.utc):
+        if dt.date() < datetime.now(timezone.utc).date():
             await interaction.response.send_message(
-                "The event date must be in the future.", ephemeral=True
+                "The event date can't be in the past.", ephemeral=True
             )
             return
 
