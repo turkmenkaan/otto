@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7B6CF6"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
+
+  <!-- antenna -->
+  <line x1="512" y1="332" x2="512" y2="250" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round"/>
+  <circle cx="512" cy="224" r="46" fill="#FFFFFF"/>
+
+  <!-- head -->
+  <rect x="246" y="324" width="532" height="446" rx="130" fill="#FFFFFF"/>
+
+  <!-- eyes -->
+  <circle cx="420" cy="520" r="60" fill="#2A2F45"/>
+  <circle cx="604" cy="520" r="60" fill="#2A2F45"/>
+  <circle cx="442" cy="500" r="20" fill="#FFFFFF"/>
+  <circle cx="626" cy="500" r="20" fill="#FFFFFF"/>
+
+  <!-- smile -->
+  <path d="M 430 640 Q 512 712 594 640" fill="none" stroke="#2A2F45" stroke-width="26" stroke-linecap="round"/>
+
+  <!-- cheeks -->
+  <circle cx="372" cy="612" r="26" fill="#FF9F8A" opacity="0.6"/>
+  <circle cx="652" cy="612" r="26" fill="#FF9F8A" opacity="0.6"/>
+</svg>
