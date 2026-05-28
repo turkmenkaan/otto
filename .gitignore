@@ -2,7 +2,7 @@
 .env
 
 # Runtime state
-events.json
+data/
 
 # Python
 __pycache__/

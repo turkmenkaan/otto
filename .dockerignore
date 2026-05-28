@@ -1,0 +1,24 @@
+# Secrets — never bake into the image
+.env
+
+# Runtime state
+data/
+
+# VCS & docs
+.git
+.gitignore
+
+# Build artifacts not needed at runtime
+assets/
+Dockerfile
+.dockerignore
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store

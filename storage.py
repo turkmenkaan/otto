@@ -1,7 +1,8 @@
 import json
 import os
 
-EVENTS_FILE = "events.json"
+DATA_DIR = "data"
+EVENTS_FILE = os.path.join(DATA_DIR, "events.json")
 
 
 def load_events() -> list[dict]:
@@ -12,6 +13,7 @@ def load_events() -> list[dict]:
 
 
 def save_events(events: list[dict]):
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(EVENTS_FILE, "w") as f:
         json.dump({"events": events}, f, indent=2)
 
