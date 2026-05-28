@@ -16,6 +16,8 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", 30))
 
+BOT_NAME = "Otto"
+
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
@@ -76,6 +78,7 @@ class PostEventModal(Modal, title="Post-Event Report"):
             title="Post-Event Report",
             color=discord.Color.blurple(),
         )
+        embed.set_author(name=BOT_NAME)
         embed.add_field(name="Event", value=event["event_name"], inline=False)
         embed.add_field(name="Date", value=dt.strftime("%B %d, %Y at %H:%M UTC"), inline=False)
         embed.add_field(name="Meetup Link", value=event["meetup_link"], inline=False)
@@ -98,7 +101,7 @@ class PostEventModal(Modal, title="Post-Event Report"):
                 await log_channel.send(embed=embed)
 
         await interaction.response.send_message(
-            "Thank you! Your post-event report has been submitted.", ephemeral=True
+            f"Thanks for the report! {BOT_NAME} has logged it.", ephemeral=True
         )
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
@@ -190,9 +193,10 @@ class EventSubmissionModal(Modal, title="Submit Event"):
 
         embed = discord.Embed(
             title="Event Registered",
-            description=f"**{event['event_name']}** has been registered. After the event, I'll DM you for a follow-up report.",
+            description=f"**{event['event_name']}** has been registered. After the event, {BOT_NAME} will DM you for a follow-up report.",
             color=discord.Color.green(),
         )
+        embed.set_author(name=BOT_NAME)
         embed.add_field(
             name="Date & Time", value=dt.strftime("%B %d, %Y at %H:%M UTC"), inline=False
         )
@@ -204,7 +208,7 @@ class EventSubmissionModal(Modal, title="Submit Event"):
             await log_channel.send(embed=embed)
 
         await interaction.response.send_message(
-            "Event submitted! I'll DM you after the event to collect the follow-up report.",
+            f"Event submitted! {BOT_NAME} will DM you after the event to collect the follow-up report.",
             ephemeral=True,
         )
 
@@ -248,11 +252,12 @@ async def check_past_events():
         embed = discord.Embed(
             title="How did your event go?",
             description=(
-                f"Your event **{event['event_name']}** has ended. "
+                f"Hi, it's {BOT_NAME}! Your event **{event['event_name']}** has ended. "
                 "Please submit a quick follow-up report by clicking the button below."
             ),
             color=discord.Color.orange(),
         )
+        embed.set_author(name=BOT_NAME)
         embed.add_field(name="Meetup Link", value=event["meetup_link"], inline=False)
 
         view = PostEventView(event["id"])
