@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from dateutil import parser as dateutil_parser
 
 from storage import add_event, get_event, update_event, get_events_by_status
+from meetup import fetch_meetup_event
 
 load_dotenv()
 
@@ -142,47 +143,82 @@ class PostEventView(View):
 # ---------------------------------------------------------------------------
 
 class EventSubmissionModal(Modal, title="Submit Event"):
-    event_name = TextInput(
-        label="Event Name",
-        placeholder="e.g. Monthly Community Meetup",
-        required=True,
-        max_length=200,
-    )
     meetup_link = TextInput(
         label="Meetup Link",
         placeholder="https://www.meetup.com/...",
         required=True,
         max_length=500,
     )
+    event_name = TextInput(
+        label="Event Name (optional)",
+        placeholder="Leave blank to pull it from the Meetup link",
+        required=False,
+        max_length=200,
+    )
     event_datetime = TextInput(
-        label="Event Date & Time (UTC)",
-        placeholder="e.g. 2026-04-15 19:00 or April 15, 2026 7:00 PM",
-        required=True,
+        label="Event Date & Time, UTC (optional)",
+        placeholder="Blank = use Meetup link; e.g. 2026-04-15 19:00",
+        required=False,
         max_length=100,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        try:
-            dt = dateutil_parser.parse(self.event_datetime.value)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-        except (ValueError, OverflowError):
-            await interaction.response.send_message(
-                "Could not parse the date/time. Try a format like `2026-04-15 19:00` or `April 15, 2026 7:00 PM`.",
+        # Fetching the Meetup page can exceed the modal's ~3s response window,
+        # so defer first and answer via followups.
+        await interaction.response.defer(ephemeral=True)
+
+        link = self.meetup_link.value.strip()
+        name = self.event_name.value.strip()
+        dt_text = self.event_datetime.value.strip()
+
+        # Only hit Meetup if the user left something for us to fill in.
+        if not name or not dt_text:
+            scraped_name, scraped_dt = await fetch_meetup_event(link)
+        else:
+            scraped_name, scraped_dt = None, None
+
+        name = name or scraped_name
+        if not name:
+            await interaction.followup.send(
+                "I couldn't read the event name from that Meetup link. "
+                "Please re-run `/submit_event` and enter the name yourself.",
+                ephemeral=True,
+            )
+            return
+
+        if dt_text:
+            try:
+                dt = dateutil_parser.parse(dt_text)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except (ValueError, OverflowError):
+                await interaction.followup.send(
+                    "Could not parse the date/time. Try a format like "
+                    "`2026-04-15 19:00` or `April 15, 2026 7:00 PM`.",
+                    ephemeral=True,
+                )
+                return
+        else:
+            dt = scraped_dt
+
+        if dt is None:
+            await interaction.followup.send(
+                "I couldn't read the event date from that Meetup link. "
+                "Please re-run `/submit_event` and enter the date yourself.",
                 ephemeral=True,
             )
             return
 
         if dt.date() < datetime.now(timezone.utc).date():
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "The event date can't be in the past.", ephemeral=True
             )
             return
 
         event = {
             "id": str(uuid.uuid4()),
-            "event_name": self.event_name.value,
-            "meetup_link": self.meetup_link.value,
+            "event_name": name,
+            "meetup_link": link,
             "event_datetime": dt.isoformat(),
             "submitter_id": interaction.user.id,
             "guild_id": interaction.guild.id,
@@ -207,13 +243,13 @@ class EventSubmissionModal(Modal, title="Submit Event"):
         if log_channel:
             await log_channel.send(embed=embed)
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Event submitted! {BOT_NAME} will DM you after the event to collect the follow-up report.",
             ephemeral=True,
         )
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Something went wrong. Please try again.", ephemeral=True
         )
         raise error
