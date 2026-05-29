@@ -238,8 +238,10 @@ class EventSubmissionModal(Modal, title="Submit Event"):
         # duration. The follow-up DM fires off this end time, not the start.
         if scraped_end and scraped_end > dt:
             event_end = scraped_end
+            end_estimated = False
         else:
             event_end = dt + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
+            end_estimated = True
 
         event = {
             "id": str(uuid.uuid4()),
@@ -254,26 +256,44 @@ class EventSubmissionModal(Modal, title="Submit Event"):
         }
         add_event(event)
 
+        start_str = dt.strftime("%B %d, %Y at %H:%M UTC")
+        end_str = event_end.strftime("%B %d, %Y at %H:%M UTC")
+
         embed = discord.Embed(
             title="Event Registered",
             description=f"**{event['event_name']}** has been registered. After the event, {BOT_NAME} will DM you for a follow-up report.",
             color=discord.Color.green(),
         )
         embed.set_author(name=BOT_NAME)
-        embed.add_field(
-            name="Date & Time", value=dt.strftime("%B %d, %Y at %H:%M UTC"), inline=False
-        )
+        embed.add_field(name="Starts", value=start_str, inline=True)
+        embed.add_field(name="Ends", value=end_str, inline=True)
         embed.add_field(name="Meetup Link", value=event["meetup_link"], inline=False)
         embed.set_footer(text=f"Event ID: {event['id'][:8]}")
 
         log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
         if log_channel:
-            await log_channel.send(embed=embed)
+            try:
+                await log_channel.send(embed=embed)
+            except discord.Forbidden:
+                print(
+                    f"Missing access to log channel {LOG_CHANNEL_ID}; "
+                    "couldn't post event registration."
+                )
 
-        await interaction.followup.send(
-            f"Event submitted! {BOT_NAME} will DM you after the event to collect the follow-up report.",
-            ephemeral=True,
+        confirmation = discord.Embed(
+            title="Event Submitted",
+            description=f"{BOT_NAME} will DM you after the event to collect the follow-up report.",
+            color=discord.Color.green(),
         )
+        confirmation.set_author(name=BOT_NAME)
+        confirmation.add_field(name="Event", value=name, inline=False)
+        confirmation.add_field(name="Starts", value=start_str, inline=True)
+        confirmation.add_field(name="Ends", value=end_str, inline=True)
+        if end_estimated:
+            confirmation.set_footer(
+                text=f"End time estimated (start + {DEFAULT_EVENT_DURATION_HOURS}h)"
+            )
+        await interaction.followup.send(embed=confirmation, ephemeral=True)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
         await interaction.followup.send(
