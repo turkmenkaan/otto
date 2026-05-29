@@ -38,10 +38,11 @@ def canonical_event_url(url: str) -> str:
     return f"{scheme}://{host}{path.rstrip('/')}".lower()
 
 
-def _parse_meetup_html(html: str) -> tuple[str | None, str | None]:
-    """Pull (name, startDate) out of an Event object in the page's JSON-LD."""
+def _parse_meetup_html(html: str) -> tuple[str | None, str | None, str | None]:
+    """Pull (name, startDate, endDate) out of an Event object in the JSON-LD."""
     name = None
     start = None
+    end = None
 
     def walk(node):
         if isinstance(node, list):
@@ -70,14 +71,33 @@ def _parse_meetup_html(html: str) -> tuple[str | None, str | None]:
             if "Event" in types:
                 name = name or obj.get("name")
                 start = start or obj.get("startDate")
-    return name, start
+                end = end or obj.get("endDate")
+    return name, start, end
 
 
-async def fetch_meetup_event(url: str) -> tuple[str | None, datetime | None]:
-    """Best-effort lookup of a Meetup event's name and UTC start time.
+def _to_utc(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp to a UTC datetime, or None if unusable."""
+    if not value:
+        return None
+    try:
+        parsed = dateutil_parser.parse(value)
+    except (ValueError, OverflowError):
+        return None
+    return (
+        parsed.astimezone(timezone.utc)
+        if parsed.tzinfo
+        else parsed.replace(tzinfo=timezone.utc)
+    )
 
-    Either field may come back None — Meetup sits behind Cloudflare, so the
-    caller must treat failure as normal and fall back to manual input.
+
+async def fetch_meetup_event(
+    url: str,
+) -> tuple[str | None, datetime | None, datetime | None]:
+    """Best-effort lookup of a Meetup event's name, UTC start and UTC end time.
+
+    Any field may come back None — Meetup sits behind Cloudflare and not every
+    event lists an end time, so the caller must treat missing values as normal
+    and fall back accordingly.
     """
     headers = {
         "User-Agent": (
@@ -90,22 +110,10 @@ async def fetch_meetup_event(url: str) -> tuple[str | None, datetime | None]:
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    return None, None
+                    return None, None, None
                 html = await resp.text()
     except (aiohttp.ClientError, asyncio.TimeoutError):
-        return None, None
+        return None, None, None
 
-    name, start = _parse_meetup_html(html)
-
-    dt = None
-    if start:
-        try:
-            parsed = dateutil_parser.parse(start)
-            dt = (
-                parsed.astimezone(timezone.utc)
-                if parsed.tzinfo
-                else parsed.replace(tzinfo=timezone.utc)
-            )
-        except (ValueError, OverflowError):
-            dt = None
-    return name, dt
+    name, start, end = _parse_meetup_html(html)
+    return name, _to_utc(start), _to_utc(end)

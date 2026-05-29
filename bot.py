@@ -4,7 +4,7 @@ from discord.ui import Modal, TextInput, View
 from discord.ext import tasks
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from dateutil import parser as dateutil_parser
 
@@ -24,6 +24,9 @@ LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", 30))
 
 BOT_NAME = "Otto"
+
+# When an event has no known end time, assume it runs this many hours from start.
+DEFAULT_EVENT_DURATION_HOURS = 3
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -189,9 +192,9 @@ class EventSubmissionModal(Modal, title="Submit Event"):
 
         # Only hit Meetup if the user left something for us to fill in.
         if not name or not dt_text:
-            scraped_name, scraped_dt = await fetch_meetup_event(link)
+            scraped_name, scraped_start, scraped_end = await fetch_meetup_event(link)
         else:
-            scraped_name, scraped_dt = None, None
+            scraped_name, scraped_start, scraped_end = None, None, None
 
         name = name or scraped_name
         if not name:
@@ -215,7 +218,7 @@ class EventSubmissionModal(Modal, title="Submit Event"):
                 )
                 return
         else:
-            dt = scraped_dt
+            dt = scraped_start
 
         if dt is None:
             await interaction.followup.send(
@@ -231,11 +234,19 @@ class EventSubmissionModal(Modal, title="Submit Event"):
             )
             return
 
+        # Use the scraped end time when it's sane; otherwise assume a default
+        # duration. The follow-up DM fires off this end time, not the start.
+        if scraped_end and scraped_end > dt:
+            event_end = scraped_end
+        else:
+            event_end = dt + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
+
         event = {
             "id": str(uuid.uuid4()),
             "event_name": name,
             "meetup_link": link,
             "event_datetime": dt.isoformat(),
+            "event_end": event_end.isoformat(),
             "submitter_id": interaction.user.id,
             "guild_id": interaction.guild.id,
             "status": "pending",
@@ -289,8 +300,15 @@ async def check_past_events():
     pending_events = get_events_by_status("pending")
 
     for event in pending_events:
-        event_dt = datetime.fromisoformat(event["event_datetime"])
-        if now < event_dt:
+        end_iso = event.get("event_end")
+        if end_iso:
+            event_end = datetime.fromisoformat(end_iso)
+        else:
+            # Older events stored only a start time; assume the default duration.
+            event_end = datetime.fromisoformat(
+                event["event_datetime"]
+            ) + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
+        if now < event_end:
             continue
 
         # Mark as awaiting feedback before attempting DM to avoid duplicate sends
