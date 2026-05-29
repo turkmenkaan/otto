@@ -46,6 +46,11 @@ def events_due_for_followup(
     ]
 
 
+def known_event_keys(events: list[Event]) -> set[str]:
+    """Canonical de-dup keys for every known event."""
+    return {canonical_event_url(e.meetup_link) for e in events}
+
+
 def select_new_event_urls(fetched_urls: list[str], known_keys: set[str]) -> list[str]:
     """Fetched URLs whose canonical key isn't already known (de-duped, order kept)."""
     new: list[str] = []

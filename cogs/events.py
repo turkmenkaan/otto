@@ -39,6 +39,13 @@ class EventsCog(commands.Cog):
         for event in services.events_due_for_followup(
             load_events(), now, settings.default_event_duration_hours
         ):
+            # An auto-discovered event nobody claimed: mark unclaimed and skip.
+            # Its claim button stays live, so a late claim flips it back to
+            # pending and this loop picks it up next tick.
+            if event.submitter_id is None:
+                await update_event(event.id, status=EventStatus.UNCLAIMED)
+                continue
+
             # Mark as awaiting feedback before attempting DM to avoid duplicate sends
             await update_event(event.id, status=EventStatus.AWAITING_FEEDBACK)
 

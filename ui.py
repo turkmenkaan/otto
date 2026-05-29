@@ -132,6 +132,66 @@ class PostEventView(View):
 
 
 # ---------------------------------------------------------------------------
+# Claim view (attached to auto-discovered event announcements)
+# ---------------------------------------------------------------------------
+
+class ClaimView(View):
+    """Persistent 'I'll cover this' button on an auto-discovered event.
+
+    Claiming sets the submitter and (re)sets the event to pending, so the
+    follow-up loop DMs the claimer for a report after the event ends.
+    """
+
+    def __init__(self, event_id: str):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+
+        btn = discord.ui.Button(
+            label="I'll cover this",
+            style=discord.ButtonStyle.success,
+            custom_id=f"claim:{event_id}",
+        )
+        btn.callback = self._on_click
+        self.add_item(btn)
+
+    async def _on_click(self, interaction: discord.Interaction):
+        event = get_event(self.event_id)
+        if event is None:
+            await interaction.response.send_message(
+                "This event is no longer available.", ephemeral=True
+            )
+            return
+        if event.submitter_id is not None:
+            await interaction.response.send_message(
+                "This event has already been claimed.", ephemeral=True
+            )
+            return
+
+        # Resetting to pending covers the late-claim case (an event that already
+        # ended and was marked unclaimed); the follow-up loop re-picks it up.
+        await update_event(
+            self.event_id,
+            submitter_id=interaction.user.id,
+            status=EventStatus.PENDING,
+        )
+
+        for child in self.children:
+            child.disabled = True
+        embeds = interaction.message.embeds if interaction.message else []
+        if embeds:
+            embed = embeds[0]
+            embed.set_footer(text=f"Claimed by {interaction.user.display_name}")
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(view=self)
+
+        await interaction.followup.send(
+            f"You've claimed this event — {BOT_NAME} will DM you for a report after it ends.",
+            ephemeral=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Event submission modal (opened from /submit_event)
 # ---------------------------------------------------------------------------
 

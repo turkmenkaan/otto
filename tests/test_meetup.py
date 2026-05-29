@@ -4,7 +4,13 @@ from datetime import timezone
 
 import pytest
 
-from meetup import canonical_event_url, _parse_meetup_html, _to_utc
+from meetup import (
+    canonical_event_url,
+    _parse_meetup_html,
+    _to_utc,
+    _extract_event_urls,
+    normalize_group_input,
+)
 
 
 def _page(jsonld: str) -> str:
@@ -132,3 +138,41 @@ def test_to_utc_none_and_invalid():
     assert _to_utc(None) is None
     assert _to_utc("") is None
     assert _to_utc("not a date") is None
+
+
+# ---------------------------------------------------------------------------
+# group discovery: normalize_group_input + _extract_event_urls
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "nova-code-coffee",
+        "Nova-Code-Coffee",
+        "https://www.meetup.com/nova-code-coffee/",
+        "https://www.meetup.com/nova-code-coffee/events/",
+        "www.meetup.com/nova-code-coffee/events/315002388/",
+    ],
+)
+def test_normalize_group_input(value):
+    slug, url = normalize_group_input(value)
+    assert slug == "nova-code-coffee"
+    assert url == "https://www.meetup.com/nova-code-coffee/events/"
+
+
+def test_extract_event_urls_relative_and_absolute_deduped():
+    html = """
+      <a href="/nova-code-coffee/events/315002388/">Event A</a>
+      <a href="https://www.meetup.com/nova-code-coffee/events/315002388/?utm=x">dup</a>
+      <a href="/Nova-Code-Coffee/events/999000111/">Event B</a>
+      <a href="/some-other-group/events/424242/">Other</a>
+    """
+    assert _extract_event_urls(html) == [
+        "https://www.meetup.com/nova-code-coffee/events/315002388",
+        "https://www.meetup.com/nova-code-coffee/events/999000111",
+        "https://www.meetup.com/some-other-group/events/424242",
+    ]
+
+
+def test_extract_event_urls_none_found():
+    assert _extract_event_urls("<html>no events here</html>") == []

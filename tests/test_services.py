@@ -70,6 +70,18 @@ def test_events_due_for_followup_legacy_no_end_uses_default():
     assert services.events_due_for_followup([e], NOW, 3) == [e]
 
 
+def test_known_event_keys():
+    events = [
+        _event(NOW, link="https://www.meetup.com/g/events/1/"),
+        _event(NOW, link="https://www.meetup.com/G/events/1/?x=1"),  # same canonical
+        _event(NOW, link="https://www.meetup.com/g/events/2/"),
+    ]
+    assert services.known_event_keys(events) == {
+        "https://www.meetup.com/g/events/1",
+        "https://www.meetup.com/g/events/2",
+    }
+
+
 def test_select_new_event_urls_dedups_and_keeps_order():
     known = {"https://www.meetup.com/g/events/1"}
     fetched = [

@@ -90,6 +90,27 @@ def _to_utc(value: str | None) -> datetime | None:
     )
 
 
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
+    )
+}
+
+
+async def _fetch_html(url: str) -> str | None:
+    """GET a page, returning its HTML or None on any failure (timeout, non-200, DNS)."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout, headers=_HEADERS) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.text()
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return None
+
+
 async def fetch_meetup_event(
     url: str,
 ) -> tuple[str | None, datetime | None, datetime | None]:
@@ -99,21 +120,43 @@ async def fetch_meetup_event(
     event lists an end time, so the caller must treat missing values as normal
     and fall back accordingly.
     """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"
-        )
-    }
-    try:
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return None, None, None
-                html = await resp.text()
-    except (aiohttp.ClientError, asyncio.TimeoutError):
+    html = await _fetch_html(url)
+    if html is None:
         return None, None, None
-
     name, start, end = _parse_meetup_html(html)
     return name, _to_utc(start), _to_utc(end)
+
+
+def normalize_group_input(value: str) -> tuple[str, str]:
+    """Turn a group slug or URL into (slug, events_url).
+
+    Accepts 'nova-code-coffee', a group URL, or an events URL; returns the
+    lowercased slug and the canonical group events page URL.
+    """
+    value = (value or "").strip()
+    if "meetup.com" in value or value.startswith("http"):
+        path = urlparse(value if value.startswith("http") else f"https://{value}").path
+        parts = [p for p in path.split("/") if p]
+        slug = parts[0] if parts else ""
+    else:
+        slug = value.strip("/").split("/")[0]
+    slug = slug.lower()
+    return slug, f"https://www.meetup.com/{slug}/events/"
+
+
+def _extract_event_urls(html: str) -> list[str]:
+    """Canonical event URLs linked on a group page, de-duped, order preserved."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for slug, event_id in re.findall(r"/([A-Za-z0-9_-]+)/events/(\d+)", html):
+        canonical = f"https://www.meetup.com/{slug.lower()}/events/{event_id}"
+        if canonical not in seen:
+            seen.add(canonical)
+            urls.append(canonical)
+    return urls
+
+
+async def fetch_group_event_urls(group_events_url: str) -> list[str]:
+    """Best-effort list of event URLs currently listed on a group's events page."""
+    html = await _fetch_html(group_events_url)
+    return _extract_event_urls(html) if html else []
