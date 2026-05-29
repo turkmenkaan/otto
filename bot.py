@@ -2,12 +2,14 @@ import discord
 from discord import app_commands
 from discord.ui import Modal, TextInput, View
 from discord.ext import tasks
-import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from dateutil import parser as dateutil_parser
 
+import services
+from config import BOT_NAME, load_settings
+from models import Event, EventStatus, EventSource
 from storage import (
     add_event,
     get_event,
@@ -15,18 +17,14 @@ from storage import (
     get_events_by_status,
     load_events,
 )
-from meetup import fetch_meetup_event, canonical_event_url
+from meetup import fetch_meetup_event
 
 load_dotenv()
+settings = load_settings()
 
-TOKEN = os.getenv("DISCORD_TOKEN")
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
-CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", 30))
-
-BOT_NAME = "Otto"
-
-# When an event has no known end time, assume it runs this many hours from start.
-DEFAULT_EVENT_DURATION_HOURS = 3
+TOKEN = settings.token
+LOG_CHANNEL_ID = settings.log_channel_id
+CHECK_INTERVAL_MINUTES = settings.check_interval_minutes
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -81,17 +79,17 @@ class PostEventModal(Modal, title="Post-Event Report"):
             await interaction.response.send_message("Event not found.", ephemeral=True)
             return
 
-        update_event(self.event_id, {"status": "completed"})
+        await update_event(self.event_id, status=EventStatus.COMPLETED)
 
-        dt = datetime.fromisoformat(event["event_datetime"])
+        dt = event.event_datetime
         embed = discord.Embed(
             title="Post-Event Report",
             color=discord.Color.blurple(),
         )
         embed.set_author(name=BOT_NAME)
-        embed.add_field(name="Event", value=event["event_name"], inline=False)
+        embed.add_field(name="Event", value=event.event_name, inline=False)
         embed.add_field(name="Date", value=dt.strftime("%B %d, %Y at %H:%M UTC"), inline=False)
-        embed.add_field(name="Meetup Link", value=event["meetup_link"], inline=False)
+        embed.add_field(name="Meetup Link", value=event.meetup_link, inline=False)
         embed.add_field(name="Attendees", value=self.attendees.value.strip(), inline=True)
         embed.add_field(name="RSVPs", value=self.rsvp_count.value.strip(), inline=True)
         embed.add_field(
@@ -104,7 +102,7 @@ class PostEventModal(Modal, title="Post-Event Report"):
         )
         embed.timestamp = interaction.created_at
 
-        guild = client.get_guild(event["guild_id"])
+        guild = client.get_guild(event.guild_id)
         if guild:
             log_channel = guild.get_channel(LOG_CHANNEL_ID)
             if log_channel:
@@ -180,10 +178,9 @@ class EventSubmissionModal(Modal, title="Submit Event"):
         name = self.event_name.value.strip()
         dt_text = self.event_datetime.value.strip()
 
-        # De-dup on the canonical event URL (truncated at the event id) so the
-        # same Meetup event can't be registered twice.
-        link_key = canonical_event_url(link)
-        if any(canonical_event_url(e.get("meetup_link", "")) == link_key for e in load_events()):
+        # De-dup on the canonical event URL so the same Meetup event can't be
+        # registered twice.
+        if services.is_duplicate(link, load_events()):
             await interaction.followup.send(
                 f"That event is already registered — {BOT_NAME} won't add it twice.",
                 ephemeral=True,
@@ -228,47 +225,43 @@ class EventSubmissionModal(Modal, title="Submit Event"):
             )
             return
 
-        if dt.date() < datetime.now(timezone.utc).date():
+        if services.is_in_past(dt, datetime.now(timezone.utc)):
             await interaction.followup.send(
                 "The event date can't be in the past.", ephemeral=True
             )
             return
 
-        # Use the scraped end time when it's sane; otherwise assume a default
-        # duration. The follow-up DM fires off this end time, not the start.
-        if scraped_end and scraped_end > dt:
-            event_end = scraped_end
-            end_estimated = False
-        else:
-            event_end = dt + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
-            end_estimated = True
+        # The follow-up DM fires off the end time, not the start.
+        event_end, end_estimated = services.compute_event_end(
+            dt, scraped_end, settings.default_event_duration_hours
+        )
 
-        event = {
-            "id": str(uuid.uuid4()),
-            "event_name": name,
-            "meetup_link": link,
-            "event_datetime": dt.isoformat(),
-            "event_end": event_end.isoformat(),
-            "submitter_id": interaction.user.id,
-            "guild_id": interaction.guild.id,
-            "status": "pending",
-            "submitted_at": datetime.now(timezone.utc).isoformat(),
-        }
-        add_event(event)
+        event = Event(
+            id=str(uuid.uuid4()),
+            event_name=name,
+            meetup_link=link,
+            event_datetime=dt,
+            event_end=event_end,
+            guild_id=interaction.guild.id,
+            status=EventStatus.PENDING,
+            source=EventSource.MANUAL,
+            submitter_id=interaction.user.id,
+        )
+        await add_event(event)
 
         start_str = dt.strftime("%B %d, %Y at %H:%M UTC")
         end_str = event_end.strftime("%B %d, %Y at %H:%M UTC")
 
         embed = discord.Embed(
             title="Event Registered",
-            description=f"**{event['event_name']}** has been registered. After the event, {BOT_NAME} will DM you for a follow-up report.",
+            description=f"**{event.event_name}** has been registered. After the event, {BOT_NAME} will DM you for a follow-up report.",
             color=discord.Color.green(),
         )
         embed.set_author(name=BOT_NAME)
         embed.add_field(name="Starts", value=start_str, inline=True)
         embed.add_field(name="Ends", value=end_str, inline=True)
-        embed.add_field(name="Meetup Link", value=event["meetup_link"], inline=False)
-        embed.set_footer(text=f"Event ID: {event['id'][:8]}")
+        embed.add_field(name="Meetup Link", value=event.meetup_link, inline=False)
+        embed.set_footer(text=f"Event ID: {event.id[:8]}")
 
         log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
         if log_channel:
@@ -291,7 +284,7 @@ class EventSubmissionModal(Modal, title="Submit Event"):
         confirmation.add_field(name="Ends", value=end_str, inline=True)
         if end_estimated:
             confirmation.set_footer(
-                text=f"End time estimated (start + {DEFAULT_EVENT_DURATION_HOURS}h)"
+                text=f"End time estimated (start + {settings.default_event_duration_hours}h)"
             )
         await interaction.followup.send(embed=confirmation, ephemeral=True)
 
@@ -317,45 +310,35 @@ async def submit_event(interaction: discord.Interaction):
 @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
 async def check_past_events():
     now = datetime.now(timezone.utc)
-    pending_events = get_events_by_status("pending")
 
-    for event in pending_events:
-        end_iso = event.get("event_end")
-        if end_iso:
-            event_end = datetime.fromisoformat(end_iso)
-        else:
-            # Older events stored only a start time; assume the default duration.
-            event_end = datetime.fromisoformat(
-                event["event_datetime"]
-            ) + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
-        if now < event_end:
-            continue
-
+    for event in services.events_due_for_followup(
+        load_events(), now, settings.default_event_duration_hours
+    ):
         # Mark as awaiting feedback before attempting DM to avoid duplicate sends
-        update_event(event["id"], {"status": "awaiting_feedback"})
+        await update_event(event.id, status=EventStatus.AWAITING_FEEDBACK)
 
-        submitter = await _fetch_user(event["submitter_id"])
+        submitter = await _fetch_user(event.submitter_id)
         if submitter is None:
-            print(f"Could not fetch user {event['submitter_id']} for event {event['id']}")
+            print(f"Could not fetch user {event.submitter_id} for event {event.id}")
             continue
 
         embed = discord.Embed(
             title="How did your event go?",
             description=(
-                f"Hi, it's {BOT_NAME}! Your event **{event['event_name']}** has ended. "
+                f"Hi, it's {BOT_NAME}! Your event **{event.event_name}** has ended. "
                 "Please submit a quick follow-up report by clicking the button below."
             ),
             color=discord.Color.orange(),
         )
         embed.set_author(name=BOT_NAME)
-        embed.add_field(name="Meetup Link", value=event["meetup_link"], inline=False)
+        embed.add_field(name="Meetup Link", value=event.meetup_link, inline=False)
 
-        view = PostEventView(event["id"])
+        view = PostEventView(event.id)
         try:
             await submitter.send(embed=embed, view=view)
         except discord.Forbidden:
             print(
-                f"Could not DM user {submitter} (DMs disabled) for event {event['id']}"
+                f"Could not DM user {submitter} (DMs disabled) for event {event.id}"
             )
 
 
@@ -379,8 +362,8 @@ async def before_check():
 async def on_ready():
     # Re-register persistent views for all events awaiting feedback
     # so buttons in existing DMs still work after a restart
-    for event in get_events_by_status("awaiting_feedback"):
-        client.add_view(PostEventView(event["id"]))
+    for event in get_events_by_status(EventStatus.AWAITING_FEEDBACK):
+        client.add_view(PostEventView(event.id))
 
     await tree.sync()
     check_past_events.start()
