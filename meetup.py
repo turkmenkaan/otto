@@ -4,9 +4,38 @@ import asyncio
 import json
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import aiohttp
 from dateutil import parser as dateutil_parser
+
+_EVENT_ID_RE = re.compile(r"/events/(\d+)")
+
+
+def canonical_event_url(url: str) -> str:
+    """Normalize a Meetup event URL to a stable de-dup key.
+
+    The key is the URL truncated at the numeric event id, lowercased, with
+    query string, fragment, trailing slash, www/non-www and http/https
+    differences collapsed:
+
+        https://www.meetup.com/Nova-Code-Coffee/events/315002388/?utm=x
+            -> https://www.meetup.com/nova-code-coffee/events/315002388
+
+    URLs that don't look like a Meetup event fall back to a normalized
+    scheme://host/path form so they still de-dup against themselves.
+    """
+    parsed = urlparse((url or "").strip())
+    host = parsed.netloc.lower()
+    path = parsed.path or ""
+
+    match = _EVENT_ID_RE.search(path)
+    if host.endswith("meetup.com") and match:
+        prefix = path[: match.end()].rstrip("/").lower()
+        return f"https://www.meetup.com{prefix}"
+
+    scheme = (parsed.scheme or "https").lower()
+    return f"{scheme}://{host}{path.rstrip('/')}".lower()
 
 
 def _parse_meetup_html(html: str) -> tuple[str | None, str | None]:

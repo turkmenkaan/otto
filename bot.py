@@ -8,8 +8,14 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from dateutil import parser as dateutil_parser
 
-from storage import add_event, get_event, update_event, get_events_by_status
-from meetup import fetch_meetup_event
+from storage import (
+    add_event,
+    get_event,
+    update_event,
+    get_events_by_status,
+    load_events,
+)
+from meetup import fetch_meetup_event, canonical_event_url
 
 load_dotenv()
 
@@ -170,6 +176,16 @@ class EventSubmissionModal(Modal, title="Submit Event"):
         link = self.meetup_link.value.strip()
         name = self.event_name.value.strip()
         dt_text = self.event_datetime.value.strip()
+
+        # De-dup on the canonical event URL (truncated at the event id) so the
+        # same Meetup event can't be registered twice.
+        link_key = canonical_event_url(link)
+        if any(canonical_event_url(e.get("meetup_link", "")) == link_key for e in load_events()):
+            await interaction.followup.send(
+                f"That event is already registered — {BOT_NAME} won't add it twice.",
+                ephemeral=True,
+            )
+            return
 
         # Only hit Meetup if the user left something for us to fill in.
         if not name or not dt_text:
