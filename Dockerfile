@@ -11,7 +11,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY bot.py config.py models.py services.py storage.py meetup.py ./
+COPY bot.py config.py models.py services.py storage.py meetup.py ui.py ./
+COPY cogs/ ./cogs/
 
 # State lives in /app/data — mount a volume here to persist events.json
 RUN mkdir -p /app/data && chown -R otto:otto /app
