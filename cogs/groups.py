@@ -133,11 +133,12 @@ class GroupsCog(commands.Cog):
     async def poll_meetup_groups(self):
         for group in load_groups():
             try:
-                await self._ingest(group, announce=group.seeded)
+                added = await self._ingest(group, announce=group.seeded)
                 if not group.seeded:
                     await update_group(group.slug, group.guild_id, seeded=True)
+                print(f"[poll] {group.slug}: {added} new event(s)")
             except Exception as error:  # one bad group must not break the rest
-                print(f"poll error for group {group.slug}: {error!r}")
+                print(f"[poll] error for group {group.slug}: {error!r}")
 
     @poll_meetup_groups.before_loop
     async def before_poll(self):
